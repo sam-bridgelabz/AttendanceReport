@@ -26,7 +26,6 @@ jobs:
               run: |
                   pip install --upgrade pip
                   pip install -r requirements.txt
-              #   pip install nbconvert
 
             - name: Create JSON file from secret
               run: |
@@ -34,4 +33,4 @@ jobs:
 
             - name: Run Blr Attendance script
               run: |
-                  papermill attendance_report.ipynb - -p location blr
+                  papermill attendance_report.ipynb /dev/null -p location blr --log-level ERROR
