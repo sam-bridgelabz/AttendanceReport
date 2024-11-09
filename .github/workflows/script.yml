@@ -26,12 +26,12 @@ jobs:
               run: |
                   pip install --upgrade pip
                   pip install -r requirements.txt
-                  pip install nbconvert
+              #   pip install nbconvert
 
             - name: Create JSON file from secret
               run: |
                   echo '${{ secrets.CREDENTIALS }}' > login_cred.json
 
-            - name: Run Python script
+            - name: Run Blr Attendance script
               run: |
-                  jupyter nbconvert --to notebook --execute --inplace attendance_report.ipynb
+                  papermill attendance_report.ipynb /dev/null -p location blr
