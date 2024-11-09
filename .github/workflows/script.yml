@@ -34,4 +34,4 @@ jobs:
 
             - name: Run Blr Attendance script
               run: |
-                  papermill attendance_report.ipynb /dev/null -p location blr
+                  papermill attendance_report.ipynb - -p location blr
