@@ -3,7 +3,7 @@ name: Run AttendanceReport Script
 on:
     schedule:
         # Run every day at midnight UTC
-        - cron: '40 12 * * *'
+        - cron: '30 18 * * *'
     push:
         branches:
             - main
