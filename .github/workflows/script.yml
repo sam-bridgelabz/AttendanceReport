@@ -3,7 +3,7 @@ name: Run AttendanceReport Script
 on:
     schedule:
         # Run every day at midnight UTC
-        - cron: '50 11 * * *'
+        - cron: '00 01 * * *'
     push:
         branches:
             - main
@@ -15,7 +15,7 @@ jobs:
 
         steps:
             - name: Checkout repository
-              uses: actions/checkout@v3
+              uses: actions/checkout@v4
 
             - name: Set up Python 3.x
               uses: actions/setup-python@v4
