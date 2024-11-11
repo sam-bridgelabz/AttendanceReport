@@ -3,7 +3,7 @@ name: Run AttendanceReport Script
 on:
     schedule:
         # Run every day at midnight UTC
-        - cron: '30 18 * * *'
+        - cron: '0 18 * * *'
     push:
         branches:
             - main
@@ -33,4 +33,4 @@ jobs:
 
             - name: Run Blr Attendance script
               run: |
-                  papermill attendance_report.ipynb /dev/null -p location blr --log-level ERROR
+                  python attendance_report.py blr
