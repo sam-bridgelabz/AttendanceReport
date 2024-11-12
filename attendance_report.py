@@ -1,6 +1,8 @@
 import argparse
 import calendar
 import json
+import logging
+import sys
 import time
 from datetime import datetime
 
@@ -10,6 +12,15 @@ import numpy as np
 import pandas as pd
 from google.oauth2.service_account import Credentials
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+    datefmt="%Y-%m-%d %H:%M",
+)
+
+logger = logging.getLogger(__name__)
+
 parser = argparse.ArgumentParser(description="Location parameter")
 
 parser.add_argument("location", type=str, help="run script based on location")
@@ -18,16 +29,26 @@ args = parser.parse_args()
 
 LOCATION = args.location
 
+if not LOCATION:
+    logger.critical("Location not found values are ['blr', 'pun', 'mum']")
+    sys.exit()
+
 # Load the configuration from the JSON file
 with open("config.json", "r", encoding="utf-8") as f:
     config = json.load(f)
 
 # Access values from the loaded config
 if LOCATION not in ["blr", "mum", "pun"]:
-    raise ValueError("Invalid Parameter")
+    logger.critical("Invalid location values are ['blr', 'pun', 'mum']")
+    sys.exit()
 
 FOR_CURRENT_MONTH = config["FOR_CURRENT_MONTH"]
-config = config[LOCATION]
+
+try:
+    config = config[LOCATION]
+except KeyError:
+    logger.critical("Location details not found exiting")
+    sys.exit()
 
 sheet_name = config["sheet_name"]
 worksheet_name = config["worksheet_name"]
@@ -47,6 +68,8 @@ scopes = [
 # Authenticate google sheet with service account
 is_auth = Credentials.from_service_account_file("login_cred.json", scopes=scopes)
 gc = gspread.authorize(is_auth)
+
+logger.info("Sheet successfully authorized")
 
 """**Generate Log Report**"""
 
@@ -69,11 +92,11 @@ log_resp_df["Timestamp"] = pd.to_datetime(log_resp_df["Timestamp"])
 if FOR_CURRENT_MONTH:
     current_month = datetime.now().month
     current_year = datetime.now().year
-    # print(current_month, current_year)
     log_resp_df = log_resp_df[
         (log_resp_df["Timestamp"].dt.month == current_month)
         & (log_resp_df["Timestamp"].dt.year == current_year)
     ]
+    logger.info("Filtered responses for current month")
 
 # Split DateTime and creates new columns as Date and Time in df
 log_resp_df[["Date", "Time"]] = log_resp_df["Timestamp"].apply(
@@ -97,6 +120,7 @@ final_log_df["Login"] = pd.to_datetime(final_log_df["Login"])
 final_log_df["Logout"] = pd.to_datetime(final_log_df["Logout"])
 
 final_log_df["TimeSpent"] = final_log_df["Logout"] - final_log_df["Login"]
+logger.info("Response df fetched successfully")
 
 """**Open Master Sheet**"""
 # Open google sheet
@@ -108,11 +132,12 @@ master_worksheet = master_sheet.worksheet(master_worksheet_name)
 data = master_worksheet.get_all_values()
 master_df = pd.DataFrame(data[1:], columns=data[0])
 
-# # Fetches only active candidates from master sheet
+# Fetches only active candidates from master sheet
 cols = ["Admit ID", "Name ", "Email", "Blr LabStatus"]
 master_df = master_df[cols]
 master_df = master_df.rename(columns={"Name ": "Name", "Email": "Email Address"})
 master_df = master_df[master_df["Blr LabStatus"] == "Active"]
+logger.info("Master sheet data fetched successfully")
 
 """**Merge master and response**"""
 
@@ -126,7 +151,7 @@ merged_df["TimeSpent"] = merged_df["TimeSpent"].apply(to_hrs)
 
 # Sort values based on log response date
 merged_df.sort_values(by=["Date"], inplace=True)
-
+logger.info("Merged response and master sheet data successfully")
 
 log_sheet = gc.open(log_sheet_name)
 # Get or create Dataframe in log csv file
@@ -135,12 +160,16 @@ try:
     log_worksheet = log_sheet.worksheet(log_worksheet_name)
     date_log_df = gspread_dataframe.get_as_dataframe(log_worksheet, usecols=cols)
     date_log_df.dropna(inplace=True, axis=0, how="all")
+    logger.info("Last logged date details fetched")
 except gspread.exceptions.WorksheetNotFound:
+    logger.info("LogDate sheet not found creating new one")
     log_worksheet = log_sheet.add_worksheet(title=log_worksheet_name, rows=50, cols=20)
     date_log_df = pd.DataFrame(columns=cols)
 except pd.errors.EmptyDataError:
+    logger.info("LogDate sheet found and creating new df")
     date_log_df = pd.DataFrame()
 except ValueError:
+    logger.info("LogDate sheet found and creating new df")
     date_log_df = pd.DataFrame(columns=cols)
 
 # Fetch unique dates from df
@@ -162,6 +191,7 @@ if not FOR_CURRENT_MONTH:
         (start_of_current_month - pd.DateOffset(months=1)).replace(day=1).date()
     )
     new_dates = [date for date in new_dates if date >= start_of_previous_month]
+    logger.info("Fetched data for previous month")
 
 
 try:
@@ -173,8 +203,10 @@ try:
         [attendance_df.columns, attendance_df.iloc[0].fillna("")]
     )
     attendance_df.drop(0, inplace=True)
+    logger.info("Attendance sheet fecthed")
 
 except gspread.exceptions.WorksheetNotFound:
+    logger.info("Attendance sheet not found, creating new one")
     today = datetime.today()
     year = today.year
     month = today.month
@@ -217,6 +249,7 @@ def determine_status_remarks(row):
 status_df = merged_df.apply(determine_status_remarks, axis=1)
 status_df.columns = ["Status", "Remarks"]
 status_df = pd.concat([merged_df, status_df], axis=1)
+logger.info("Added new date columns to attendance sheet with remarks")
 
 pivot_df = status_df.pivot(index="Admit ID", columns="Date", values=["Status", "Remarks"])
 pivot_df = pivot_df.swaplevel(0, 1, axis=1).sort_index(axis=1, level=0)
@@ -233,6 +266,7 @@ for date in new_dates:
     attendance_df[(date, "Remarks")] = attendance_df[(date, "Remarks")].fillna("Absent")
 
 gspread_dataframe.set_with_dataframe(attendance_sheet, attendance_df)
+logger.info("Successfully updated attendance worksheet")
 
 # Add new dates to master sheet
 dates_lst = []
@@ -247,6 +281,7 @@ for date in new_dates:
     formated_date = date.strftime("%d-%b-%Y")  # 01-Jan-2024
 
     # Get or create worksheet
+    logger.info("Creating new sheet- %s", formated_date)
     try:
         ws = log_sheet.worksheet(title=str(formated_date))
     except gspread.exceptions.WorksheetNotFound:
@@ -265,3 +300,4 @@ for date in new_dates:
 # Log the latest dates added to csv file
 date_log_df = pd.concat([date_log_df, pd.DataFrame(dates_lst)])
 gspread_dataframe.set_with_dataframe(log_worksheet, date_log_df)
+logger.info("Last log details updated successfully")
