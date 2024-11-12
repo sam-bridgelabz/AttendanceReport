@@ -196,15 +196,27 @@ if not FOR_CURRENT_MONTH:
 
 try:
     attendance_sheet = log_sheet.worksheet(title=log_attendance_worksheet_name)
-    attendance_df = gspread_dataframe.get_as_dataframe(attendance_sheet)
+    attendance_df = gspread_dataframe.get_as_dataframe(attendance_sheet, drop_empty_rows=False)
+    if attendance_df.empty:
+        logger.info("Empty attendance sheet, populating data")
+        raise pd.errors.EmptyDataError("Empty Attendance sheet")
     attendance_df = attendance_df.loc[:, ~attendance_df.columns.str.contains("^Unnamed")]
     attendance_df.columns = attendance_df.columns.str.replace(r"\.\d+$", "", regex=True)
     attendance_df.columns = pd.MultiIndex.from_arrays(
         [attendance_df.columns, attendance_df.iloc[0].fillna("")]
     )
+
     attendance_df.drop(0, inplace=True)
+    attendance_df.dropna(how="all")
     logger.info("Attendance sheet fecthed")
 
+except pd.errors.EmptyDataError:
+    attendance_df = master_df.copy()
+    attendance_df.columns = pd.MultiIndex.from_tuples(
+        zip(attendance_df.columns, [""] * len(attendance_df.columns))
+    )
+
+    gspread_dataframe.set_with_dataframe(attendance_sheet, attendance_df)
 except gspread.exceptions.WorksheetNotFound:
     logger.info("Attendance sheet not found, creating new one")
     today = datetime.today()
@@ -231,30 +243,26 @@ def determine_status_remarks(row):
     logout_is_valid = pd.notna(row["Logout"]) and row["Logout"] != ""
 
     if login_is_valid and logout_is_valid:
-        status = "P"
-        remarks = "All good"
+        status = "P - All good"
     elif login_is_valid and not logout_is_valid:
-        status = "P"
-        remarks = "Logout not done"
+        status = "P - Logout"
     elif not login_is_valid and logout_is_valid:
-        status = "P"
-        remarks = "Login not done"
+        status = "P - Login"
     else:
-        status = "A"
-        remarks = "Absent"
+        status = "A - Absent"
 
-    return pd.Series([status, remarks])
+    return pd.Series(status)
 
 
 status_df = merged_df.apply(determine_status_remarks, axis=1)
-status_df.columns = ["Status", "Remarks"]
+status_df.columns = ["Status"]
 status_df = pd.concat([merged_df, status_df], axis=1)
-logger.info("Added new date columns to attendance sheet with remarks")
+logger.info("Added new date columns to attendance sheet with time spend")
 
-pivot_df = status_df.pivot(index="Admit ID", columns="Date", values=["Status", "Remarks"])
+pivot_df = status_df.pivot(index="Admit ID", columns="Date", values=["Status", "TimeSpent"])
 pivot_df = pivot_df.swaplevel(0, 1, axis=1).sort_index(axis=1, level=0)
 pivot_df = pivot_df[
-    [col for date in pivot_df.columns.levels[0] for col in [(date, "Status"), (date, "Remarks")]]
+    [col for date in pivot_df.columns.levels[0] for col in [(date, "Status"), (date, "TimeSpent")]]
 ]
 
 pivot_df = pivot_df[new_dates]
@@ -262,8 +270,8 @@ pivot_df = pivot_df[new_dates]
 attendance_df = attendance_df.merge(pivot_df, left_on="Admit ID", right_index=True, how="left")
 
 for date in new_dates:
-    attendance_df[(date, "Status")] = attendance_df[(date, "Status")].fillna("A")
-    attendance_df[(date, "Remarks")] = attendance_df[(date, "Remarks")].fillna("Absent")
+    attendance_df[(date, "Status")] = attendance_df[(date, "Status")].fillna("A - Absent")
+    attendance_df[(date, "TimeSpent")] = attendance_df[(date, "TimeSpent")].fillna("")
 
 gspread_dataframe.set_with_dataframe(attendance_sheet, attendance_df)
 logger.info("Successfully updated attendance worksheet")
@@ -298,6 +306,9 @@ for date in new_dates:
     dates_lst.append(log_dict)
 
 # Log the latest dates added to csv file
-date_log_df = pd.concat([date_log_df, pd.DataFrame(dates_lst)])
+if not date_log_df.empty:
+    date_log_df = pd.concat([date_log_df, pd.DataFrame(dates_lst)])
+else:
+    date_log_df = pd.DataFrame(dates_lst)
 gspread_dataframe.set_with_dataframe(log_worksheet, date_log_df)
 logger.info("Last log details updated successfully")
