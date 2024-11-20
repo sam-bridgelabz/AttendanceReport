@@ -29,34 +29,16 @@ args = parser.parse_args()
 
 LOCATION = args.location
 
-if not LOCATION:
-    logger.critical("Location not found values are ['blr', 'pun', 'mum']")
-    sys.exit()
+# if not LOCATION:
+#     logger.critical("Location not found values are ['blr', 'pun', 'mum']")
+#     sys.exit()
 
-# Load the configuration from the JSON file
-with open("config.json", "r", encoding="utf-8") as f:
-    config = json.load(f)
+# # Access values from the loaded config
+# if LOCATION not in ["blr", "mum", "pun"]:
+#     logger.critical("Invalid location values are ['blr', 'pun', 'mum']")
+#     sys.exit()
 
-# Access values from the loaded config
-if LOCATION not in ["blr", "mum", "pun"]:
-    logger.critical("Invalid location values are ['blr', 'pun', 'mum']")
-    sys.exit()
-
-FOR_CURRENT_MONTH = config["FOR_CURRENT_MONTH"]
-
-try:
-    config = config[LOCATION]
-except KeyError:
-    logger.critical("Location details not found exiting")
-    sys.exit()
-
-sheet_name = config["sheet_name"]
-worksheet_name = config["worksheet_name"]
-master_sheet_name = config["master_sheet_name"]
-master_worksheet_name = config["master_worksheet_name"]
-log_sheet_name = config["log_sheet_name"]
-log_worksheet_name = config["log_worksheet_name"]
-log_attendance_worksheet_name = config["log_attendance_worksheet_name"]
+config = {}
 
 """**Authorize Google Sheet**"""
 scopes = [
@@ -70,6 +52,33 @@ is_auth = Credentials.from_service_account_file("login_cred.json", scopes=scopes
 gc = gspread.authorize(is_auth)
 
 logger.info("Sheet successfully authorized")
+
+# Open google sheet
+settings_sheet = gc.open("AttendanceSettings")
+
+# Get worksheet
+settings_worksheet = settings_sheet.worksheet("settings")
+
+# Load sheet data into pandas dataframe with specific columns
+config = settings_worksheet.get_all_records()
+config = list(filter(lambda x: x["Location"] == LOCATION, config))
+if not config:
+    logger.critical("Invalid location values")
+    sys.exit()
+
+config = config[0]
+
+sheet_name = config["sheet_name"]
+worksheet_name = config["worksheet_name"]
+master_sheet_name = config["master_sheet_name"]
+master_worksheet_name = config["master_worksheet_name"]
+log_sheet_name = config["log_sheet_name"]
+log_worksheet_name = config["log_worksheet_name"]
+log_attendance_worksheet_name = config["log_attendance_worksheet_name"]
+try:
+    for_current_month = bool(config["for_current_month"])
+except:
+    for_current_month = True
 
 """**Generate Log Report**"""
 
@@ -89,7 +98,7 @@ log_resp_df.dropna(inplace=True, axis=0, how="all")
 # Typecast datetime column from str to datetime
 log_resp_df["Timestamp"] = pd.to_datetime(log_resp_df["Timestamp"])
 
-if FOR_CURRENT_MONTH:
+if for_current_month:
     current_month = datetime.now().month
     current_year = datetime.now().year
     log_resp_df = log_resp_df[
@@ -184,7 +193,7 @@ else:
 # Get dates to be added to master sheet
 new_dates = np.setdiff1d(days, existing_dates)
 
-if not FOR_CURRENT_MONTH:
+if not for_current_month:
     today = pd.Timestamp.today()
     start_of_current_month = today.replace(day=1).date()
     start_of_previous_month = (
