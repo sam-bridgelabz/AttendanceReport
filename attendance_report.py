@@ -1,6 +1,5 @@
 import argparse
 import calendar
-import json
 import logging
 import sys
 import time
@@ -29,35 +28,6 @@ args = parser.parse_args()
 
 LOCATION = args.location
 
-if not LOCATION:
-    logger.critical("Location not found values are ['blr', 'pun', 'mum']")
-    sys.exit()
-
-# Load the configuration from the JSON file
-with open("config.json", "r", encoding="utf-8") as f:
-    config = json.load(f)
-
-# Access values from the loaded config
-if LOCATION not in ["blr", "mum", "pun"]:
-    logger.critical("Invalid location values are ['blr', 'pun', 'mum']")
-    sys.exit()
-
-FOR_CURRENT_MONTH = config["FOR_CURRENT_MONTH"]
-
-try:
-    config = config[LOCATION]
-except KeyError:
-    logger.critical("Location details not found exiting")
-    sys.exit()
-
-sheet_name = config["sheet_name"]
-worksheet_name = config["worksheet_name"]
-master_sheet_name = config["master_sheet_name"]
-master_worksheet_name = config["master_worksheet_name"]
-log_sheet_name = config["log_sheet_name"]
-log_worksheet_name = config["log_worksheet_name"]
-log_attendance_worksheet_name = config["log_attendance_worksheet_name"]
-
 """**Authorize Google Sheet**"""
 scopes = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -70,6 +40,33 @@ is_auth = Credentials.from_service_account_file("login_cred.json", scopes=scopes
 gc = gspread.authorize(is_auth)
 
 logger.info("Sheet successfully authorized")
+
+# Open google sheet
+settings_sheet = gc.open("AttendanceSettings")
+
+# Get worksheet
+settings_worksheet = settings_sheet.worksheet("settings")
+
+# Load sheet data into pandas dataframe with specific columns
+config = settings_worksheet.get_all_records()
+config = list(filter(lambda x: x["Location"] == LOCATION, config))
+if not config:
+    logger.critical("Invalid location values")
+    sys.exit()
+
+config = config[0]
+
+sheet_name = config["responses_sheet_name"]
+worksheet_name = config["responses_worksheet_name"]
+master_sheet_name = config["master_sheet_name"]
+master_worksheet_name = config["master_worksheet_name"]
+log_sheet_name = config["log_sheet_name"]
+log_worksheet_name = config["log_worksheet_name"]
+log_attendance_worksheet_name = config["log_attendance_worksheet_name"]
+try:
+    for_current_month = bool(config["for_current_month"])
+except:
+    for_current_month = True
 
 """**Generate Log Report**"""
 
@@ -89,9 +86,10 @@ log_resp_df.dropna(inplace=True, axis=0, how="all")
 # Typecast datetime column from str to datetime
 log_resp_df["Timestamp"] = pd.to_datetime(log_resp_df["Timestamp"])
 
-if FOR_CURRENT_MONTH:
-    current_month = datetime.now().month
-    current_year = datetime.now().year
+if for_current_month:
+    current_date = datetime.now()
+    current_month = current_date.month
+    current_year = current_date.year
     log_resp_df = log_resp_df[
         (log_resp_df["Timestamp"].dt.month == current_month)
         & (log_resp_df["Timestamp"].dt.year == current_year)
@@ -133,9 +131,10 @@ data = master_worksheet.get_all_values()
 master_df = pd.DataFrame(data[1:], columns=data[0])
 
 # Fetches only active candidates from master sheet
-cols = ["Admit ID", "Name ", "Email", "Blr LabStatus"]
+cols = ["Admit ID", "Name", "Email", "Blr LabStatus"]
 master_df = master_df[cols]
-master_df = master_df.rename(columns={"Name ": "Name", "Email": "Email Address"})
+master_df = master_df.rename(columns={"Name": "Name", "Email": "Email Address"})
+master_df_base = master_df.copy()
 master_df = master_df[master_df["Blr LabStatus"] == "Active"]
 logger.info("Master sheet data fetched successfully")
 
@@ -184,7 +183,7 @@ else:
 # Get dates to be added to master sheet
 new_dates = np.setdiff1d(days, existing_dates)
 
-if not FOR_CURRENT_MONTH:
+if not for_current_month:
     today = pd.Timestamp.today()
     start_of_current_month = today.replace(day=1).date()
     start_of_previous_month = (
@@ -202,6 +201,24 @@ try:
         raise pd.errors.EmptyDataError("Empty Attendance sheet")
     attendance_df = attendance_df.loc[:, ~attendance_df.columns.str.contains("^Unnamed")]
     attendance_df.columns = attendance_df.columns.str.replace(r"\.\d+$", "", regex=True)
+
+    status_mapping = master_df_base.set_index("Email Address")["Blr LabStatus"].to_dict()
+    attendance_df["Blr LabStatus"] = (
+        attendance_df["Email Address"]
+        .map(status_mapping)
+        .combine_first(attendance_df["Blr LabStatus"])
+    )
+    attendance_df.dropna(how="all", inplace=True)
+    logger.info("Lab status updated successfully")
+
+    if attendance_df.shape[0] - 1 != master_df_base.shape[0]:
+        logger.info("Added new candidates to the sheet")
+        cols = ["Admit ID", "Name", "Email Address", "Blr LabStatus"]
+        new_exist_df = attendance_df[cols]
+        unique_rows = master_df_base[
+            ~master_df_base.apply(tuple, axis=1).isin(new_exist_df.apply(tuple, axis=1))
+        ]
+        attendance_sheet.append_rows(values=unique_rows.values.tolist())
     attendance_df.columns = pd.MultiIndex.from_arrays(
         [attendance_df.columns, attendance_df.iloc[0].fillna("")]
     )
@@ -269,9 +286,24 @@ pivot_df = pivot_df[new_dates]
 
 attendance_df = attendance_df.merge(pivot_df, left_on="Admit ID", right_index=True, how="left")
 
+# Create a mapping for the 'Blr LabStatus' to the corresponding status values
+status_mapping = {"Dropped": "Dr - Dropped", "Deployed": "De - Deployed"}
+
+# Use the 'map' method to efficiently replace values based on the 'Blr LabStatus'
+attendance_df["Status_fill"] = (
+    attendance_df["Blr LabStatus"].map(status_mapping).fillna("A - Absent")
+)
+
+# Fill the Status column for all new dates using the status mappings
 for date in new_dates:
-    attendance_df[(date, "Status")] = attendance_df[(date, "Status")].fillna("A - Absent")
+    # Use vectorized fillna to replace missing values in the 'Status' and 'TimeSpent' columns
+    attendance_df[(date, "Status")] = attendance_df[(date, "Status")].fillna(
+        attendance_df["Status_fill"]
+    )
     attendance_df[(date, "TimeSpent")] = attendance_df[(date, "TimeSpent")].fillna("")
+
+# Drop the temporary 'Status_fill' column
+attendance_df.drop(columns=["Status_fill"], inplace=True, level=0)
 
 gspread_dataframe.set_with_dataframe(attendance_sheet, attendance_df)
 logger.info("Successfully updated attendance worksheet")
