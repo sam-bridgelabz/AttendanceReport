@@ -1,6 +1,5 @@
 import argparse
 import calendar
-import json
 import logging
 import sys
 import time
@@ -28,17 +27,6 @@ parser.add_argument("location", type=str, help="run script based on location")
 args = parser.parse_args()
 
 LOCATION = args.location
-
-# if not LOCATION:
-#     logger.critical("Location not found values are ['blr', 'pun', 'mum']")
-#     sys.exit()
-
-# # Access values from the loaded config
-# if LOCATION not in ["blr", "mum", "pun"]:
-#     logger.critical("Invalid location values are ['blr', 'pun', 'mum']")
-#     sys.exit()
-
-config = {}
 
 """**Authorize Google Sheet**"""
 scopes = [
@@ -68,8 +56,8 @@ if not config:
 
 config = config[0]
 
-sheet_name = config["sheet_name"]
-worksheet_name = config["worksheet_name"]
+sheet_name = config["responses_sheet_name"]
+worksheet_name = config["responses_worksheet_name"]
 master_sheet_name = config["master_sheet_name"]
 master_worksheet_name = config["master_worksheet_name"]
 log_sheet_name = config["log_sheet_name"]
@@ -99,8 +87,9 @@ log_resp_df.dropna(inplace=True, axis=0, how="all")
 log_resp_df["Timestamp"] = pd.to_datetime(log_resp_df["Timestamp"])
 
 if for_current_month:
-    current_month = datetime.now().month
-    current_year = datetime.now().year
+    current_date = datetime.now()
+    current_month = current_date.month
+    current_year = current_date.year
     log_resp_df = log_resp_df[
         (log_resp_df["Timestamp"].dt.month == current_month)
         & (log_resp_df["Timestamp"].dt.year == current_year)
@@ -142,9 +131,10 @@ data = master_worksheet.get_all_values()
 master_df = pd.DataFrame(data[1:], columns=data[0])
 
 # Fetches only active candidates from master sheet
-cols = ["Admit ID", "Name ", "Email", "Blr LabStatus"]
+cols = ["Admit ID", "Name", "Email", "Blr LabStatus"]
 master_df = master_df[cols]
-master_df = master_df.rename(columns={"Name ": "Name", "Email": "Email Address"})
+master_df = master_df.rename(columns={"Name": "Name", "Email": "Email Address"})
+master_df_base = master_df.copy()
 master_df = master_df[master_df["Blr LabStatus"] == "Active"]
 logger.info("Master sheet data fetched successfully")
 
@@ -211,6 +201,24 @@ try:
         raise pd.errors.EmptyDataError("Empty Attendance sheet")
     attendance_df = attendance_df.loc[:, ~attendance_df.columns.str.contains("^Unnamed")]
     attendance_df.columns = attendance_df.columns.str.replace(r"\.\d+$", "", regex=True)
+
+    status_mapping = master_df_base.set_index("Email Address")["Blr LabStatus"].to_dict()
+    attendance_df["Blr LabStatus"] = (
+        attendance_df["Email Address"]
+        .map(status_mapping)
+        .combine_first(attendance_df["Blr LabStatus"])
+    )
+    attendance_df.dropna(how="all", inplace=True)
+    logger.info("Lab status updated successfully")
+
+    if attendance_df.shape[0] - 1 != master_df_base.shape[0]:
+        logger.info("Added new candidates to the sheet")
+        cols = ["Admit ID", "Name", "Email Address", "Blr LabStatus"]
+        new_exist_df = attendance_df[cols]
+        unique_rows = master_df_base[
+            ~master_df_base.apply(tuple, axis=1).isin(new_exist_df.apply(tuple, axis=1))
+        ]
+        attendance_sheet.append_rows(values=unique_rows.values.tolist())
     attendance_df.columns = pd.MultiIndex.from_arrays(
         [attendance_df.columns, attendance_df.iloc[0].fillna("")]
     )
@@ -278,9 +286,24 @@ pivot_df = pivot_df[new_dates]
 
 attendance_df = attendance_df.merge(pivot_df, left_on="Admit ID", right_index=True, how="left")
 
+# Create a mapping for the 'Blr LabStatus' to the corresponding status values
+status_mapping = {"Dropped": "Dr - Dropped", "Deployed": "De - Deployed"}
+
+# Use the 'map' method to efficiently replace values based on the 'Blr LabStatus'
+attendance_df["Status_fill"] = (
+    attendance_df["Blr LabStatus"].map(status_mapping).fillna("A - Absent")
+)
+
+# Fill the Status column for all new dates using the status mappings
 for date in new_dates:
-    attendance_df[(date, "Status")] = attendance_df[(date, "Status")].fillna("A - Absent")
+    # Use vectorized fillna to replace missing values in the 'Status' and 'TimeSpent' columns
+    attendance_df[(date, "Status")] = attendance_df[(date, "Status")].fillna(
+        attendance_df["Status_fill"]
+    )
     attendance_df[(date, "TimeSpent")] = attendance_df[(date, "TimeSpent")].fillna("")
+
+# Drop the temporary 'Status_fill' column
+attendance_df.drop(columns=["Status_fill"], inplace=True, level=0)
 
 gspread_dataframe.set_with_dataframe(attendance_sheet, attendance_df)
 logger.info("Successfully updated attendance worksheet")
