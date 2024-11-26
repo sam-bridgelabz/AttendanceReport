@@ -11,10 +11,10 @@
 
 <body class="h-screen w-screen bg-gray-300 flex items-center justify-center">
     <div class="bg-gradient-to-r from-blue-100 to-purple-200 w-full min-h-screen flex items-center justify-center">
-        <div class="bg-white w-1/2 h-fit flex items-start justify-center rounded-lg shadow-lg pt-5 relative">
-            {% if msg_type == 'success' %}
+        <div id="form-ctn" class="bg-white w-1/2 h-fit flex items-start justify-center rounded-lg shadow-lg relative">
+            {% if msg_type in ['success', 'warning'] %}
             <form action="/" method="post" class="flex flex-col gap-6 w-full h-full p-3" id="form">
-                <div class="flex flex-col gap-6 w-full h-full">
+                <div class="flex flex-col gap-5 w-full h-full">
                     <div class="flex justify-center">
                         <p class="text-lg font-bold text-gray-800">BL Fellowship Portal</p>
                     </div>
@@ -23,6 +23,10 @@
                         <input type="email" placeholder="Enter the email" id="email" name="email" value="{{ for }}"
                             class="w-full p-3 border border-gray-300 rounded-md placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
+
+                    <div class="flex justify-center items-center min-h-10"><span
+                            class="font-bold {{ 'text-green-500' if msg_type == 'success' else 'text-red-500' }}">{{
+                            message }}</span></div>
 
                     <div class="w-full h-10">
                         <button id="log-btn" type="submit" name="action" value="{{ action }}"
@@ -33,24 +37,36 @@
                 </div>
             </form>
             {% else %}
-            <div>{{ message }}</div>
+            <p><span class="font-bold">{{ message }}</span></p>
             {% endif %}
         </div>
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', (e) => {
 
-            const host = window.location.href
-
-            // if (window.innerWidth <= 768) {
-            //     window.location.href = `${host}error`
-            // }
-            if (`{{ msg_type }}`) {
+            if (`{{ msg_type }}` === 'success') {
                 fetch('https://api.ipify.org?format=json')
                     .then(resp => { return resp.json() })
                     .then(data => {
                         const form = document.getElementById("form");
+
+                        if (window.innerWidth <= 768) {
+                            if (form) {
+                                form.remove(); // Remove the form element
+
+                                const messageDiv = document.createElement("div");
+                                messageDiv.innerText = "Mobile devices are not supported.";
+                                messageDiv.className = "text-center font-bold w-full bg-red-500 text-white p-4 rounded-md";
+
+                                const parent = document.querySelector("#form-ctn");
+                                if (parent) {
+                                    parent.appendChild(messageDiv);
+                                }
+                                return
+                            }
+                        }
+
                         const hiddenInput = document.createElement("input");
                         hiddenInput.type = "hidden";
                         hiddenInput.name = "ip";
@@ -58,85 +74,6 @@
                         form.appendChild(hiddenInput);
                     })
             }
-            // eleProps = {
-            //     email: document.getElementById('email'),
-            //     action: document.getElementById('log-btn'),
-            // }
-
-            // const log_data = {}
-            // eleProps.email.addEventListener('input', (e) => {
-            //     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            //     let emailValue = e.target.value
-            //     if (!emailValue) {
-            //         eleProps.email.classList.add('focus:ring-blue-500')
-            //         eleProps.email.classList.remove('focus:ring-red-500')
-            //         eleProps.action.setAttribute("data-action", "Login");
-            //         eleProps.action.innerHTML = `{{ action }}`
-            //     } else if (!emailRegex.test(emailValue)) {
-            //         eleProps.email.classList.remove('focus:ring-blue-500')
-            //         eleProps.email.classList.add('focus:ring-red-500')
-            //     } else if (emailValue && emailRegex.test(emailValue)) {
-            //         eleProps.email.classList.add('focus:ring-blue-500')
-            //         eleProps.email.classList.remove('focus:ring-red-500')
-
-            //         log_data['email'] = emailValue
-
-            //         fetch(`${host}api/user/${emailValue}`, {
-            //             method: "GET"
-            //         }).then(resp => {
-            //             return resp.json()
-            //         }).then(data => {
-            //             let action = data['message']
-            //             if (data.status === 'success') {
-            //                 eleProps.action.setAttribute("data-action", action);
-            //                 eleProps.action.innerHTML = action
-            //                 eleProps.action.removeAttribute('disabled');
-            //                 return
-            //             }
-            //             eleProps.action.setAttribute("data-action", action);
-            //             eleProps.action.innerHTML = action
-            //         }).catch(e => { })
-            //         return
-            //     }
-            //     eleProps.action.setAttribute('disabled', 'true');
-            // })
-
-            // eleProps.action.addEventListener('click', () => {
-            //     let action = eleProps.action.getAttribute("data-action");
-            //     log_data['action'] = action
-
-            //     eleProps.action.setAttribute('disabled', 'true');
-
-            //     fetch('https://api.ipify.org?format=json')
-            //         .then(response => { return response.json() })
-            //         .then(data => {
-            //             log_data['ip'] = data.ip
-
-            //             fetch(`${host}api/submit`, {
-            //                 method: "POST",
-            //                 body: JSON.stringify(log_data),
-            //                 headers: { "Content-Type": "application/json" },
-            //             }).then(resp => {
-            //                 return resp.json()
-            //             }).then(data => {
-            //                 if (data.status != 'success') {
-            //                     return
-            //                 }
-            //                 setTimeout(() => {
-            //                     if (action === 'Login') {
-            //                         eleProps.action.setAttribute("data-action", "Logout");
-            //                         eleProps.action.removeAttribute('disabled');
-            //                         eleProps.action.innerHTML = "Logout"
-            //                     } else if (action === 'Logout') {
-            //                         eleProps.action.setAttribute("data-action", "Logout");
-            //                         eleProps.action.setAttribute('disabled', 'true');
-            //                         eleProps.action.innerHTML = "All done for today"
-            //                     }
-            //                     eleProps.email.value = ''
-            //                 }, 1500)
-            //             })
-            //         });
-            // })
 
             // Disable right-click
             // document.addEventListener("contextmenu", event => event.preventDefault());

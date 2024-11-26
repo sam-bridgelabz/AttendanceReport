@@ -10,14 +10,14 @@ import httpx
 import pandas as pd
 import redis
 from apscheduler.schedulers.blocking import BlockingScheduler
-from fastapi import APIRouter, FastAPI, HTTPException, Request, Response, status
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from google.oauth2.service_account import Credentials
-from pydantic import BaseModel, EmailStr
 
-cache = redis.StrictRedis(**{"host": "localhost", "port": 6379, "db": 0, "password": "Zeus.1996"})
+# from pydantic import BaseModel, EmailStr
+
 IP = ["106.51.84.193"]
 MASTER_EMAIL_CACHE_KEY = "master_emails"
 
@@ -69,22 +69,20 @@ async def lifespan(app: FastAPI):
 
 templates = Jinja2Templates(directory="templates")
 
-router = APIRouter(prefix="/api")
-
 app = FastAPI(title="Attendance", lifespan=lifespan, docs_url=None, redoc_url=None)
-app.mount("/static", StaticFiles(directory="static"), name="static")
-# app.include_router(router)
+# app.mount("/static", StaticFiles(directory="static"), name="static")
 
+cache = redis.StrictRedis(**{"host": "localhost", "port": 6379, "db": 0, "password": "Zeus.1996"})
 
-class Actions(Enum):
-    login = "Login"
-    logout = "Logout"
-
-
-class FormModel(BaseModel):
-    email: EmailStr
-    action: Actions
-    ip: str
+disallowed_browsers = [
+    "firefox",
+    # "safari",
+    "opr/",
+    "edg/",
+    "vivaldi",
+    "brave",
+    "duckduckgo",
+]
 
 
 def get_local_ipv4():
@@ -125,7 +123,7 @@ def set_cookie_age():
     return int(abs(exp_seconds))
 
 
-def form_submit(data):
+def submit_form(data):
     ip = data.get("ip")
     if ip not in IP:
         return "You are not connected to proper network to use this feature", "error"
@@ -133,27 +131,23 @@ def form_submit(data):
     email = data.get("email")
     action = data.get("action")
     if not email or not action:
-        return "Invalid form data", "error"
+        return "Invalid form data", "warning"
 
     user_log = cache.get(name="user_log")
     user_log = json.loads(user_log) if user_log else {}
-
-    candidate_details = user_log.get(email)
-
+    candidate_details = user_log.get(email, {})
     utc_time = datetime.now(tz=timezone.utc)
     log_time = utc_time.astimezone(tz=ZoneInfo(key="Asia/Kolkata")).strftime("%m/%d/%Y %H:%M:%S")
 
     if candidate_details and action == "Login":
-        return "Login already done for today", "error"
+        return "Login already done for today", "warning"
     elif candidate_details and action == "Logout":
         if "Logout" in candidate_details:
-            return "Logout already done for today", "error"
+            return "Logout already done for today", "warning"
         candidate_details.update({action: log_time})
     elif not candidate_details and action == "Logout":
-        return "Login not done yet for today", "error"
+        return "Login not done yet for today", "warning"
     elif action == "Login":
-        if not candidate_details:
-            candidate_details = {}
         candidate_details.update({action: log_time})
     candidate_details.update({"email": email, "ip": ip})
     user_log.update({email: candidate_details})
@@ -162,185 +156,94 @@ def form_submit(data):
 
 
 @app.api_route("/", methods=["GET", "POST"], response_class=HTMLResponse)
-async def render_portal(request: Request, response: Response):
-    message = "Login successful"
+async def render_portal(request: Request):
+    message = ""
     msg_type = "success"
-    disallowed_browsers = [
-        "firefox",
-        # "safari",
-        "opr/",
-        "edg/",
-        "vivaldi",
-        "brave",
-        "duckduckgo",
-    ]
 
     user_agent = request.headers.get("user-agent", "").lower()
 
-    if any(device in user_agent for device in ["mobi", "android", "iphone", "ipad", "ipod"]):
-        # raise HTTPException(status_code=403, detail="Mobile devices are not supported.")
-        message = "Mobile devices are not supported."
-        msg_type = "error"
-        return templates.TemplateResponse(
-            "portal.html", {"request": request, "message": message, "msg_type": msg_type}
-        )
+    # if any(device in user_agent for device in ["mobi", "android", "iphone", "ipad", "ipod"]):
+    #     message = "Mobile devices are not supported."
+    #     msg_type = "error"
+    #     return templates.TemplateResponse(
+    #         "portal.html", {"request": request, "message": message, "msg_type": msg_type}
+    #     )
 
-    if "chrome" not in user_agent or any(browser in user_agent for browser in disallowed_browsers):
-        # raise HTTPException(
-        #     status_code=403,
-        #     detail="This application is only accessible via Google Chrome. Please switch to Chrome.",
-        # )
-        message = "This application is only accessible via Google Chrome. Please switch to Chrome."
-        msg_type = "error"
-        return templates.TemplateResponse(
-            "portal.html", {"request": request, "message": message, "msg_type": msg_type}
-        )
+    # if "chrome" not in user_agent or any(browser in user_agent for browser in disallowed_browsers):
+    #     message = "This application is only accessible via Google Chrome. Please switch to Chrome."
+    #     msg_type = "error"
+    #     return templates.TemplateResponse(
+    #         "portal.html", {"request": request, "message": message, "msg_type": msg_type}
+    #     )
 
-    cookie_action = request.cookies.get("next_action", "Login")
+    cookie_action = request.cookies.get("action", "Login")
     cookie_for = request.cookies.get("for", "")
 
     if request.method == "POST":
         form_data = await request.form()
         data = dict(form_data.items())
 
-        message, msg_type = form_submit(data=data)
+        message, msg_type = submit_form(data=data)
 
         max_age = set_cookie_age()
 
+        cookie_action = "Logout" if cookie_action == "Login" else "All done for today"
+
+        response = RedirectResponse(url="/", status_code=303)
+
         response.set_cookie(
-            key="next_action",
+            key="action",
             value=cookie_action,
-            httponly=True,
+            path="/",
             max_age=max_age,
-            domain=None,
+            httponly=True,
             samesite="lax",
-            secure=False,
         )
 
         response.set_cookie(
             key="for",
-            value=cookie_for,
+            value=data.get("email"),
             path="/",
-            httponly=True,
             max_age=max_age,
-            domain=None,
+            httponly=True,
             samesite="lax",
-            secure=False,
         )
 
-    return templates.TemplateResponse(
-        "portal.html",
-        {
+        response.set_cookie(
+            key="message",
+            value=message,
+            path="/",
+            max_age=max_age,
+            httponly=True,
+            samesite="lax",
+        )
+
+        response.set_cookie(
+            key="msg_type",
+            value=msg_type,
+            path="/",
+            max_age=max_age,
+            httponly=True,
+            samesite="lax",
+        )
+
+        return response
+
+    message = request.cookies.get("message", "")
+    msg_type = request.cookies.get("msg_type", "success")
+
+    response = templates.TemplateResponse(
+        name="portal.html",
+        context={
             "request": request,
             "action": cookie_action,
             "for": cookie_for,
-            "message": "",
-            "msg_type": "success",
+            "message": message,
+            "msg_type": msg_type,
         },
     )
 
+    response.delete_cookie("message")
+    response.delete_cookie("msg_type")
 
-# @router.post("/submit", status_code=status.HTTP_200_OK)
-# def form_submission(request: Request, response: Response, body: FormModel):
-#     ip = body.ip
-#     # if ip not in IP:
-#     #     response.status_code = status.HTTP_406_NOT_ACCEPTABLE
-#     #     return {
-#     #         "message": "Looks like you are not connected to proper network to use this feature",
-#     #         "status": "error",
-#     #     }
-#     data = body.model_dump()
-#     email = data.get("email")
-#     action = data.get("action")
-#     if not email:
-#         response.status_code = status.HTTP_404_NOT_FOUND
-#         return {"message": "Email not found", "status": "error"}
-#     if not action:
-#         response.status_code = status.HTTP_404_NOT_FOUND
-#         return {"message": "Action not found", "status": "error"}
-#     action = action.value
-
-#     user_log = cache.get(name="user_log")
-#     if user_log:
-#         user_log = json.loads(user_log)
-#     else:
-#         user_log = {}
-
-#     candidate_details = user_log.get(email)
-#     # if not candidate_details:
-#     #     candidate_details = {"email": email, "ip": ip}
-
-#     utc_time = datetime.now(tz=timezone.utc)
-#     log_time = utc_time.astimezone(tz=ZoneInfo(key="Asia/Kolkata")).strftime("%m/%d/%Y %H:%M:%S")
-#     if candidate_details and action == "Login":
-#         response.status_code = status.HTTP_406_NOT_ACCEPTABLE
-#         return {"message": "Login already done for today", "status": "error"}
-#     elif candidate_details and action == "Logout":
-#         # candidate_details = candidate_details
-#         if "Logout" in candidate_details:
-#             response.status_code = status.HTTP_406_NOT_ACCEPTABLE
-#             return {"message": "Logout already done for today", "status": "error"}
-#         candidate_details.update({action: log_time})
-#     elif not candidate_details and action == "Logout":
-#         response.status_code = status.HTTP_406_NOT_ACCEPTABLE
-#         return {"message": "Login not done yet for today", "status": "error"}
-#     elif action == "Login":
-#         if not candidate_details:
-#             candidate_details = {}
-#         candidate_details.update({action: log_time})
-#     candidate_details.update({"email": email, "ip": ip})
-#     user_log.update({email: candidate_details})
-#     cache.set(name="user_log", value=json.dumps(user_log))
-#     response.set_cookie(
-#         key="action",
-#         value=action,
-#         path="/",
-#         httponly=True,
-#         max_age=set_cookie_age(),
-#         domain=None,
-#         samesite="lax",
-#         secure=False,
-#     )
-#     return {
-#         "message": f"{action} Successful",
-#         "status": "success",
-#         "data": candidate_details,
-#     }
-
-
-@router.get("/user/{email}", status_code=status.HTTP_200_OK)
-def get_user_details(request: Request, response: Response, email: str):
-    master_email_lst = cache.get(name=MASTER_EMAIL_CACHE_KEY)
-    if not master_email_lst:
-        response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-        return {"message": "Unable to fetch details... Try again later", "status": "error"}
-
-    master_email_lst = json.loads(master_email_lst)
-    if email not in master_email_lst:
-        response.status_code = status.HTTP_400_BAD_REQUEST
-        return {"message": "Sorry... You are not an active candidate!", "status": "error"}
-
-    user_log = cache.get("user_log")
-    if not user_log:
-        user_log = {}
-    else:
-        user_log = json.loads(user_log)
-
-    is_exist = user_log.get(email)
-    action, api_status = "", "success"
-
-    if not is_exist:
-        action = "Login"
-    else:
-        if "Login" and "Logout" in is_exist:
-            action = "All done for today"
-            api_status = "warning"
-        elif "Logout" not in is_exist:
-            action = "Logout"
-    return {
-        "message": action,
-        "status": api_status,
-    }
-
-
-app.include_router(router)
+    return response
