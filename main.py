@@ -162,19 +162,19 @@ async def render_portal(request: Request):
 
     user_agent = request.headers.get("user-agent", "").lower()
 
-    # if any(device in user_agent for device in ["mobi", "android", "iphone", "ipad", "ipod"]):
-    #     message = "Mobile devices are not supported."
-    #     msg_type = "error"
-    #     return templates.TemplateResponse(
-    #         "portal.html", {"request": request, "message": message, "msg_type": msg_type}
-    #     )
+    if any(device in user_agent for device in ["mobi", "android", "iphone", "ipad", "ipod"]):
+        message = "Mobile devices are not supported."
+        msg_type = "error"
+        return templates.TemplateResponse(
+            "portal.html", {"request": request, "message": message, "msg_type": msg_type}
+        )
 
-    # if "chrome" not in user_agent or any(browser in user_agent for browser in disallowed_browsers):
-    #     message = "This application is only accessible via Google Chrome. Please switch to Chrome."
-    #     msg_type = "error"
-    #     return templates.TemplateResponse(
-    #         "portal.html", {"request": request, "message": message, "msg_type": msg_type}
-    #     )
+    if "chrome" not in user_agent or any(browser in user_agent for browser in disallowed_browsers):
+        message = "This application is only accessible via Google Chrome. Please switch to Chrome."
+        msg_type = "error"
+        return templates.TemplateResponse(
+            "portal.html", {"request": request, "message": message, "msg_type": msg_type}
+        )
 
     cookie_action = request.cookies.get("action", "Login")
     cookie_for = request.cookies.get("for", "")
