@@ -6,7 +6,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login Portal</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@fingerprintjs/fingerprintjs@3/dist/fp.min.js"></script>
 </head>
 
 <body class="h-screen w-screen bg-gray-300 flex items-center justify-center">
@@ -24,12 +23,12 @@
                             class="w-full p-3 border border-gray-300 rounded-md placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
 
-                    <div class="flex justify-center items-center min-h-10"><span
+                    <div class="flex justify-center items-center min-h-10"><span id="msg"
                             class="font-bold {{ 'text-green-500' if msg_type == 'success' else 'text-red-500' }}">{{
                             message }}</span></div>
 
                     <div class="w-full h-10">
-                        <button id="log-btn" type="submit" name="action" value="{{ action }}"
+                        <button id="log-btn" type="submit" name="action" value="{{ action }}" disabled
                             class="w-full h-full bg-blue-500 focus:bg-blue-700 text-white font-bold py-2 px-4 rounded-full disabled:bg-gray-400 disabled:cursor-not-allowed">{{
                             action }}
                         </button>
@@ -37,7 +36,10 @@
                 </div>
             </form>
             {% else %}
-            <p><span class="font-bold">{{ message }}</span></p>
+            <div
+                class="text-center font-bold w-full h-10 flex items-center justify-center bg-red-500 text-white rounded-md">
+                <span>{{ message }}</span>
+            </div>
             {% endif %}
         </div>
     </div>
@@ -45,15 +47,18 @@
     <script>
         document.addEventListener('DOMContentLoaded', (e) => {
 
-            if (`{{ msg_type }}` === 'success') {
+            if (`{{ msg_type }}` != 'error') {
                 fetch('https://api.ipify.org?format=json')
                     .then(resp => { return resp.json() })
                     .then(data => {
                         const form = document.getElementById("form");
+                        const actionBtn = document.getElementById('log-btn')
+                        const email = document.getElementById('email');
+                        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
                         if (window.innerWidth <= 768) {
                             if (form) {
-                                form.remove(); // Remove the form element
+                                form.remove();
 
                                 const messageDiv = document.createElement("div");
                                 messageDiv.innerText = "Mobile devices are not supported.";
@@ -72,23 +77,51 @@
                         hiddenInput.name = "ip";
                         hiddenInput.value = data['ip'];
                         form.appendChild(hiddenInput);
+
+                        email.addEventListener('input', (e) => {
+                            let emailValue = e.target.value
+                            if (!emailValue) {
+                                email.classList.add('focus:ring-blue-500')
+                                email.classList.remove('focus:ring-red-500')
+                                actionBtn.setAttribute('disabled', 'true');
+                            } else if (!emailRegex.test(emailValue)) {
+                                email.classList.remove('focus:ring-blue-500')
+                                email.classList.add('focus:ring-red-500')
+                                actionBtn.setAttribute('disabled', 'true');
+                            } else if (emailValue && emailRegex.test(emailValue)) {
+                                email.classList.add('focus:ring-blue-500')
+                                email.classList.remove('focus:ring-red-500')
+                                if (['Login', 'Logout'].includes(actionBtn.value)) {
+                                    actionBtn.removeAttribute('disabled');
+                                }
+                                return
+                            }
+                        })
+
+                        setTimeout(() => {
+                            document.getElementById("msg").innerHTML = ''
+                        }, 2500)
+
+                        if (email.value && (actionBtn.value === 'Login' || actionBtn.value === 'Logout')) {
+                            actionBtn.removeAttribute('disabled')
+                        }
                     })
             }
 
             // Disable right-click
-            // document.addEventListener("contextmenu", event => event.preventDefault());
+            document.addEventListener("contextmenu", event => event.preventDefault());
 
-            // // Disable specific key combinations
-            // document.addEventListener("keydown", event => {
-            //     // Disable F12, Ctrl+Shift+I, Ctrl+Shift+J, and Ctrl+U
-            //     if (
-            //         event.key === "F12" ||
-            //         (event.ctrlKey && event.shiftKey && (event.key === "I" || event.key === "J")) ||
-            //         (event.ctrlKey && event.key === "U")
-            //     ) {
-            //         event.preventDefault();
-            //     }
-            // });
+            // Disable specific key combinations
+            document.addEventListener("keydown", event => {
+                // Disable F12, Ctrl+Shift+I, Ctrl+Shift+J, and Ctrl+U
+                if (
+                    event.key === "F12" ||
+                    (event.ctrlKey && event.shiftKey && (event.key === "I" || event.key === "J")) ||
+                    (event.ctrlKey && event.key === "U")
+                ) {
+                    event.preventDefault();
+                }
+            });
         })
     </script>
 

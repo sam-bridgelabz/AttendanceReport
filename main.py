@@ -2,7 +2,6 @@ import json
 import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from enum import Enum
 from zoneinfo import ZoneInfo
 
 import gspread
@@ -12,11 +11,8 @@ import redis
 from apscheduler.schedulers.blocking import BlockingScheduler
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from google.oauth2.service_account import Credentials
-
-# from pydantic import BaseModel, EmailStr
 
 IP = ["106.51.84.193"]
 MASTER_EMAIL_CACHE_KEY = "master_emails"
@@ -42,7 +38,7 @@ def update_master_email_cache():
     master_worksheet = master_sheet.worksheet("Nov-24")
 
     data = master_worksheet.get_all_values()
-    # print(data)
+
     master_df = pd.DataFrame(data[1:], columns=data[0])
 
     # Fetches only active candidates from master sheet
@@ -56,7 +52,7 @@ def update_master_email_cache():
 
 scheduler = BlockingScheduler()
 scheduler.add_job(flush_redis, "cron", minute=0, hour=0)
-scheduler.add_job(update_master_email_cache, "cron", hour=0, minute=30)
+scheduler.add_job(update_master_email_cache, "cron", minute=0, hour=0)
 
 
 @asynccontextmanager
@@ -70,7 +66,6 @@ async def lifespan(app: FastAPI):
 templates = Jinja2Templates(directory="templates")
 
 app = FastAPI(title="Attendance", lifespan=lifespan, docs_url=None, redoc_url=None)
-# app.mount("/static", StaticFiles(directory="static"), name="static")
 
 cache = redis.StrictRedis(**{"host": "localhost", "port": 6379, "db": 0, "password": "Zeus.1996"})
 
@@ -126,12 +121,18 @@ def set_cookie_age():
 def submit_form(data):
     ip = data.get("ip")
     if ip not in IP:
-        return "You are not connected to proper network to use this feature", "error"
+        return "You are not connected to proper network to use this feature", "warning"
 
     email = data.get("email")
     action = data.get("action")
     if not email or not action:
         return "Invalid form data", "warning"
+
+    master_lst = cache.get("master_emails")
+    master_lst = json.loads(master_lst) if master_lst else []
+
+    if email not in master_lst:
+        return "Sorry... You are not an active user", "warning"
 
     user_log = cache.get(name="user_log")
     user_log = json.loads(user_log) if user_log else {}
@@ -191,23 +192,24 @@ async def render_portal(request: Request):
 
         response = RedirectResponse(url="/", status_code=303)
 
-        response.set_cookie(
-            key="action",
-            value=cookie_action,
-            path="/",
-            max_age=max_age,
-            httponly=True,
-            samesite="lax",
-        )
+        if msg_type == "success":
+            response.set_cookie(
+                key="action",
+                value=cookie_action,
+                path="/",
+                max_age=max_age,
+                httponly=True,
+                samesite="lax",
+            )
 
-        response.set_cookie(
-            key="for",
-            value=data.get("email"),
-            path="/",
-            max_age=max_age,
-            httponly=True,
-            samesite="lax",
-        )
+            response.set_cookie(
+                key="for",
+                value=data.get("email"),
+                path="/",
+                max_age=max_age,
+                httponly=True,
+                samesite="lax",
+            )
 
         response.set_cookie(
             key="message",
