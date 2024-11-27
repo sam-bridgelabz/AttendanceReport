@@ -50,6 +50,11 @@ def update_master_email_cache():
     cache.set(name=MASTER_EMAIL_CACHE_KEY, value=email_lst)
 
 
+def dump_to_csv():
+    logged_data = cache.get(name="user_log")
+    logged_data = json.loads(logged_data) if logged_data else {}
+
+
 scheduler = BlockingScheduler()
 scheduler.add_job(flush_redis, "cron", minute=0, hour=0)
 scheduler.add_job(update_master_email_cache, "cron", minute=0, hour=0)

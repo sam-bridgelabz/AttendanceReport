@@ -37,7 +37,7 @@
             </form>
             {% else %}
             <div
-                class="text-center font-bold w-full h-10 flex items-center justify-center bg-red-500 text-white rounded-md">
+                class="text-center font-bold w-full h-10 py-6 flex items-center justify-center bg-red-500 text-white rounded-md">
                 <span>{{ message }}</span>
             </div>
             {% endif %}
@@ -51,18 +51,23 @@
                 fetch('https://api.ipify.org?format=json')
                     .then(resp => { return resp.json() })
                     .then(data => {
+                        const parent = document.querySelector("#form-ctn");
                         const form = document.getElementById("form");
                         const actionBtn = document.getElementById('log-btn')
                         const email = document.getElementById('email');
                         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                        const isMobileUA = /Mobi|Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+                        const isSmallScreen = window.innerWidth <= 768;
 
-                        if (window.innerWidth <= 768) {
+                        parent.classList.add(['hidden'])
+
+                        if (isMobileUA || isSmallScreen) {
                             if (form) {
                                 form.remove();
 
                                 const messageDiv = document.createElement("div");
                                 messageDiv.innerText = "Mobile devices are not supported.";
-                                messageDiv.className = "text-center font-bold w-full bg-red-500 text-white p-4 rounded-md";
+                                messageDiv.className = "text-center font-bold w-full bg-red-500 text-white py-6 rounded-md";
 
                                 const parent = document.querySelector("#form-ctn");
                                 if (parent) {
@@ -72,6 +77,7 @@
                             }
                         }
 
+                        parent.classList.remove(['hidden'])
                         const hiddenInput = document.createElement("input");
                         hiddenInput.type = "hidden";
                         hiddenInput.name = "ip";
