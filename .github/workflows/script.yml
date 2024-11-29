@@ -34,7 +34,3 @@ jobs:
             - name: Run Blr Attendance script
               run: |
                   python attendance_report.py blr
-
-            - name: Run Mum Attendance script
-              run: |
-                  python attendance_report.py mum
