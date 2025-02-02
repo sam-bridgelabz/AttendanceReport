@@ -1,4 +1,4 @@
-name: Run AttendanceReport Script
+name: Run AttendanceReport Script1
 
 on:
     schedule:
