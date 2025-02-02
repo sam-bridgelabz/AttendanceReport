@@ -1,0 +1,40 @@
+name: Run AttendanceReport Script
+
+on:
+    schedule:
+        # Run every day at midnight UTC
+        - cron: '0 18 * * *'
+    push:
+        branches:
+            - main
+    workflow_dispatch: # Allows manual triggering
+
+jobs:
+    run_script:
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Python 3.x
+              uses: actions/setup-python@v4
+              with:
+                  python-version: '3.12.4'
+
+            - name: Install dependencies
+              run: |
+                  pip install --upgrade pip
+                  pip install -r requirements.txt
+
+            - name: Create JSON file from secret
+              run: |
+                  echo '${{ secrets.CREDENTIALS }}' > login_cred.json
+
+            - name: Run Blr Attendance script
+              run: |
+                  python attendance_report.py blr
+                  
+            - name: Run Mum Attendance script
+              run: |
+                  python attendance_report.py mum
