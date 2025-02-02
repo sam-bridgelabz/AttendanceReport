@@ -99,9 +99,22 @@ if for_current_month:
     logger.info("Filtered responses for current month")
 
 # Split DateTime and creates new columns as Date and Time in df
-log_resp_df[["Date", "Time"]] = log_resp_df["Timestamp"].apply(
-    lambda x: pd.Series([x.date(), x.time()])
-)
+# log_resp_df[["Date", "Time"]] = log_resp_df["Timestamp"].apply(
+#     lambda x: pd.Series([x.date(), x.time()])
+# )
+# Ensure Timestamp column has valid datetime values
+log_resp_df = log_resp_df[log_resp_df["Timestamp"].notna()]
+
+# Convert Timestamp column to datetime explicitly
+log_resp_df["Timestamp"] = pd.to_datetime(log_resp_df["Timestamp"], errors="coerce")
+
+# Drop rows where Timestamp conversion failed
+log_resp_df = log_resp_df.dropna(subset=["Timestamp"])
+
+# Apply function to extract Date and Time
+log_resp_df["Date"] = log_resp_df["Timestamp"].dt.date
+log_resp_df["Time"] = log_resp_df["Timestamp"].dt.time
+
 
 # Sort the values based on Date and Email
 sorted_log_resp_df = log_resp_df.sort_values(by=["Date", "Email Address"])
